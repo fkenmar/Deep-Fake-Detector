@@ -7,3 +7,5 @@ pillow
 kagglehub
 opencv-python
 numpy
+scikit-learn
+mediapipe
