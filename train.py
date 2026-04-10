@@ -17,6 +17,7 @@ from torch.utils.data import DataLoader
 from torchvision.datasets import ImageFolder
 from transformers import ViTForImageClassification, ViTImageProcessor
 from peft import LoraConfig, get_peft_model
+from torchvision import transforms as T
 import torch
 import matplotlib.pyplot as plt
 
@@ -33,8 +34,23 @@ PATIENCE        = 2       # early stop after 2 epochs without improvement
 
 # ── Processor ─────────────────────────────────────────────────────────────────
 processor = ViTImageProcessor.from_pretrained(MODEL_ID)
+IMG_SIZE = processor.size.get("height", 224)
 
-def transform(img):
+# Augmented transform for training — forces the model to generalize
+train_augment = T.Compose([
+    T.RandomHorizontalFlip(),
+    T.RandomRotation(10),
+    T.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.1),
+    T.RandomResizedCrop(IMG_SIZE, scale=(0.85, 1.0)),
+])
+
+def train_transform(img):
+    if img.mode != "RGB":
+        img = img.convert("RGB")
+    img = train_augment(img)
+    return processor(images=img, return_tensors="pt")["pixel_values"].squeeze(0)
+
+def val_transform(img):
     if img.mode != "RGB":
         img = img.convert("RGB")
     return processor(images=img, return_tensors="pt")["pixel_values"].squeeze(0)
@@ -45,8 +61,8 @@ if __name__ == "__main__":
     print(f"Using device: {device}")
 
     # ── Datasets ──────────────────────────────────────────────────────────────
-    train_ds = ImageFolder(DATASET / "Train",      transform=transform)
-    val_ds   = ImageFolder(DATASET / "Validation", transform=transform)
+    train_ds = ImageFolder(DATASET / "Train",      transform=train_transform)
+    val_ds   = ImageFolder(DATASET / "Validation", transform=val_transform)
 
     train_loader = DataLoader(train_ds, batch_size=BATCH_SIZE, shuffle=True,  num_workers=4, persistent_workers=True, pin_memory=True)
     val_loader   = DataLoader(val_ds,   batch_size=BATCH_SIZE, shuffle=False, num_workers=4, persistent_workers=True, pin_memory=True)
@@ -68,7 +84,7 @@ if __name__ == "__main__":
         r=8,
         lora_alpha=16,
         target_modules=["query", "value"],
-        lora_dropout=0.1,
+        lora_dropout=0.25,
         bias="none",
     )
     model = get_peft_model(base_model, lora_config)
