@@ -154,10 +154,11 @@ class SupConLoss(nn.Module):
 # ── Config ────────────────────────────────────────────────────────────────────
 DATASET_1       = Path("/Users/kenmarfrancisco/.cache/kagglehub/datasets/manjilkarki/deepfake-and-real-images/versions/1/Dataset")
 DATASET_2       = Path("/Users/kenmarfrancisco/.cache/kagglehub/datasets/xhlulu/140k-real-and-fake-faces/versions/2/real_vs_fake/real-vs-fake")
+DATASET_3       = Path("~/.cache/huggingface/datasets/openrl_deepfakeface").expanduser()
 SAVE_DIR        = Path("./model")
 EPOCHS          = 15
-BATCH_SIZE      = 64
-ACCUM_STEPS     = 1       # effective batch size = 64
+BATCH_SIZE      = 72      # divisible by 6 groups (3 datasets × 2 classes); 12 samples per group
+ACCUM_STEPS     = 1       # effective batch size = BATCH_SIZE × ACCUM_STEPS
 LR              = 2e-4
 PATIENCE        = 3       # early stop after 3 epochs without improvement
 LABEL_SMOOTHING = 0.1     # prevents overconfident predictions on CE component
@@ -316,31 +317,66 @@ if __name__ == "__main__":
     remap_labels(train_ds2)
     remap_labels(val_ds2)
 
+    # Dataset 3: OpenRL/DeepFakeFace diffusion (Real/Fake folders)
+    train_ds3 = ImageFolder(DATASET_3 / "Train",      transform=train_transform)
+    val_ds3   = ImageFolder(DATASET_3 / "Validation", transform=val_transform)
+    remap_labels(train_ds3)
+    remap_labels(val_ds3)
+
     # Combine
-    train_ds = ConcatDataset([train_ds1, train_ds2])
-    val_ds   = ConcatDataset([val_ds1, val_ds2])
+    train_ds = ConcatDataset([train_ds1, train_ds2, train_ds3])
+    val_ds   = ConcatDataset([val_ds1, val_ds2, val_ds3])
+
+    def dataset_signature(name, path, ds):
+        real_count = sum(1 for t in ds.targets if t == 0)
+        fake_count = sum(1 for t in ds.targets if t == 1)
+        return {
+            "name": name,
+            "path": str(path),
+            "total": len(ds),
+            "real": real_count,
+            "fake": fake_count,
+        }
+
+    current_validation_signature = [
+        dataset_signature("DS1", DATASET_1 / "Validation", val_ds1),
+        dataset_signature("DS2", DATASET_2 / "valid", val_ds2),
+        dataset_signature("DS3", DATASET_3 / "Validation", val_ds3),
+    ]
+    val_dataset_ranges = []
+    val_offset = 0
+    for ds_name, ds in [("DS1", val_ds1), ("DS2", val_ds2), ("DS3", val_ds3)]:
+        next_offset = val_offset + len(ds)
+        val_dataset_ranges.append((ds_name, val_offset, next_offset))
+        val_offset = next_offset
 
     # ── Build group indices for balanced sampling ─────────────────────────
-    # 4 groups: DS1-Real, DS1-Fake, DS2-Real, DS2-Fake
-    # Global index in ConcatDataset: DS1 occupies [0, len(ds1)),
-    #                                DS2 occupies [len(ds1), len(ds1)+len(ds2))
+    # 6 groups: DS1-Real, DS1-Fake, DS2-Real, DS2-Fake, DS3-Real, DS3-Fake
+    # Global index in ConcatDataset is the cumulative offset per source.
     ds1_offset = 0
     ds2_offset = len(train_ds1)
+    ds3_offset = len(train_ds1) + len(train_ds2)
 
     group_ds1_real = [ds1_offset + i for i, t in enumerate(train_ds1.targets) if t == 0]
     group_ds1_fake = [ds1_offset + i for i, t in enumerate(train_ds1.targets) if t == 1]
     group_ds2_real = [ds2_offset + i for i, t in enumerate(train_ds2.targets) if t == 0]
     group_ds2_fake = [ds2_offset + i for i, t in enumerate(train_ds2.targets) if t == 1]
+    group_ds3_real = [ds3_offset + i for i, t in enumerate(train_ds3.targets) if t == 0]
+    group_ds3_fake = [ds3_offset + i for i, t in enumerate(train_ds3.targets) if t == 1]
 
-    group_indices = [group_ds1_real, group_ds1_fake, group_ds2_real, group_ds2_fake]
+    group_indices = [group_ds1_real, group_ds1_fake,
+                     group_ds2_real, group_ds2_fake,
+                     group_ds3_real, group_ds3_fake]
 
     print(f"Dataset 1 — Train: {len(train_ds1)} | Val: {len(val_ds1)}")
     print(f"Dataset 2 — Train: {len(train_ds2)} | Val: {len(val_ds2)}")
+    print(f"Dataset 3 — Train: {len(train_ds3)} | Val: {len(val_ds3)}")
     print(f"Combined  — Train: {len(train_ds)} | Val: {len(val_ds)}")
     print(f"Balanced sampling groups:")
     print(f"  DS1-Real: {len(group_ds1_real)} | DS1-Fake: {len(group_ds1_fake)}")
     print(f"  DS2-Real: {len(group_ds2_real)} | DS2-Fake: {len(group_ds2_fake)}")
-    print(f"  Per-group per batch: {BATCH_SIZE // 4} (batch_size={BATCH_SIZE}, 4 groups)")
+    print(f"  DS3-Real: {len(group_ds3_real)} | DS3-Fake: {len(group_ds3_fake)}")
+    print(f"  Per-group per batch: {BATCH_SIZE // 6} (batch_size={BATCH_SIZE}, 6 groups)")
 
     balanced_sampler = BalancedBatchSampler(group_indices, batch_size=BATCH_SIZE)
     if device.type == "cuda":
@@ -364,7 +400,7 @@ if __name__ == "__main__":
         clip_vision = PeftModel.from_pretrained(clip_vision, dora_checkpoint, is_trainable=True)
         model = DeepfakeDetector(clip_vision)
         print("Loading head weights...")
-        head_data = torch.load(head_checkpoint, map_location=device, weights_only=True)
+        head_data = torch.load(head_checkpoint, map_location=device, weights_only=False)
         model.fft_branch.load_state_dict(head_data["fft_branch"])
         model.classifier.load_state_dict(head_data["classifier"])
     else:
@@ -438,13 +474,24 @@ if __name__ == "__main__":
     patience_counter = 0
 
     if resuming and train_state_path.exists():
-        state = torch.load(train_state_path, map_location=device, weights_only=True)
+        state = torch.load(train_state_path, map_location=device, weights_only=False)
         optimizer.load_state_dict(state["optimizer"])
         scheduler.load_state_dict(state["scheduler"])
         start_epoch = state["epoch"] + 1
-        best_val_auc = state["best_val_auc"]
-        patience_counter = state["patience_counter"]
-        print(f"Restored training state: epoch={start_epoch}, best_val_auc={best_val_auc:.4f}")
+        saved_validation_signature = state.get("validation_signature")
+
+        if saved_validation_signature == current_validation_signature:
+            best_val_auc = float(state["best_val_auc"])
+            patience_counter = state["patience_counter"]
+            print(f"Restored training state: epoch={start_epoch}, best_val_auc={best_val_auc:.4f}")
+        else:
+            best_val_auc = 0.0
+            patience_counter = 0
+            if saved_validation_signature is None:
+                reason = "checkpoint has no validation dataset signature"
+            else:
+                reason = "validation dataset signature changed"
+            print(f"Restored weights/optimizer at epoch={start_epoch}, but reset best_val_auc/patience: {reason}")
     elif resuming:
         print("Warning: DoRA weights found but no train_state.pt — optimizer/scheduler start fresh")
 
@@ -520,6 +567,16 @@ if __name__ == "__main__":
         val_auc = roc_auc_score(val_labels_np, val_probs_np)
         val_acc = ((val_probs_np >= 0.5).astype(int) == val_labels_np).mean()
         val_loss_avg = val_loss_sum / len(val_loader)
+        per_dataset_val_metrics = []
+        for ds_name, start, end in val_dataset_ranges:
+            ds_probs = val_probs_np[start:end]
+            ds_labels = val_labels_np[start:end]
+            if len(np.unique(ds_labels)) < 2:
+                ds_auc = float("nan")
+            else:
+                ds_auc = roc_auc_score(ds_labels, ds_probs)
+            ds_acc = ((ds_probs >= 0.5).astype(int) == ds_labels).mean()
+            per_dataset_val_metrics.append((ds_name, ds_auc, ds_acc, len(ds_labels)))
 
         history["train_loss"].append(train_loss_avg)
         history["train_acc"].append(train_acc)
@@ -528,11 +585,15 @@ if __name__ == "__main__":
 
         print(f"\nEpoch {epoch+1}/{EPOCHS} — Train Loss: {train_loss_avg:.4f} | Val Loss: {val_loss_avg:.4f} | "
               f"Train Acc: {train_acc:.4f} | Val AUC: {val_auc:.4f} | Val Acc: {val_acc:.4f}")
+        print("Per-dataset Val:")
+        for ds_name, ds_auc, ds_acc, ds_count in per_dataset_val_metrics:
+            auc_text = "nan" if np.isnan(ds_auc) else f"{ds_auc:.4f}"
+            print(f"  {ds_name} — AUC: {auc_text} | Acc: {ds_acc:.4f} | N: {ds_count}")
 
         # ── Save training state every epoch (for safe resume) ────────────────
         # ── Save best + versioned snapshots + early stopping ─────────────────
         if val_auc > best_val_auc:
-            best_val_auc = val_auc
+            best_val_auc = float(val_auc)
             patience_counter = 0
             # Save DoRA adapter weights
             model.clip_vision.save_pretrained(SAVE_DIR / "dora")
@@ -550,6 +611,7 @@ if __name__ == "__main__":
                 "epoch": epoch,
                 "best_val_auc": best_val_auc,
                 "patience_counter": patience_counter,
+                "validation_signature": current_validation_signature,
             }, SAVE_DIR / "train_state.pt")
             # Versioned snapshot for rollback
             snapshot_dir = SAVE_DIR / f"dora_epoch{epoch+1}_auc{val_auc:.4f}"
@@ -574,7 +636,7 @@ if __name__ == "__main__":
         merged_clip = merged_clip.merge_and_unload()
         # Build final inference model and save
         final_model = DeepfakeDetector(merged_clip)
-        head_data = torch.load(SAVE_DIR / "head_weights.pt", weights_only=True)
+        head_data = torch.load(SAVE_DIR / "head_weights.pt", weights_only=False)
         final_model.fft_branch.load_state_dict(head_data["fft_branch"])
         final_model.classifier.load_state_dict(head_data["classifier"])
         final_model.save_model(SAVE_DIR)

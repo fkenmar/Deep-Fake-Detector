@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # Deepfake Detector
 
 An image-based deepfake detection web app that classifies face images as **Real** or **Deepfake** using a two-branch fusion model: a DoRA-fine-tuned CLIP ViT-L/14 backbone (spatial features) combined with a lightweight CNN over the 2D FFT magnitude spectrum (frequency artifacts). A Flask backend serves predictions, attention-rollout heatmaps, and uncanny-valley heuristics; a React/Vite frontend provides the UI.
@@ -147,3 +148,46 @@ This repository is for research and educational use. Please respect the upstream
 
 - CLIP ViT-L/14 weights — MIT License (OpenAI).
 - Kaggle datasets — see each dataset page for terms of use.
+=======
+# Deepfake Detector                                                                              
+                                                                                                 
+  An image-based deepfake detection web app that classifies face images as **Real** or **Deepfake**
+   using a fine-tuned Vision Transformer (ViT).                                                  
+                                                                                                   
+  ## Setup                                                                                       
+                                                                                                 
+  ```bash
+  pip install -r requirements.txt
+  python scripts/download_deepfakeface.py   # one-time: prep OpenRL diffusion dataset
+  python train.py   # fine-tune the model (requires Kaggle auth + HF auth)
+  python app.py     # start the web app at http://127.0.0.1:5000
+                                                                                                   
+  How It Works                                                                                   
+                                                                                                   
+  1. Upload a face image to the web interface                                                      
+  2. OpenCV decodes and preprocesses the image                                                   
+  3. A fine-tuned ViT model classifies it as Real or Deepfake                                      
+  4. Confidence score is displayed                                                                 
+                                                                                                   
+  Credits                                                                                          
+                                                                                                   
+  Pretrained Model                                                                               
+  - Deep-Fake-Detector-v2-Model by prithivMLmods                                                 
+  - https://huggingface.co/prithivMLmods/Deep-Fake-Detector-v2-Model                               
+  - License: Apache 2.0                                             
+                                                                                                   
+  Datasets
+  - Deepfake and Real Images by Manjil Karki
+  - https://www.kaggle.com/datasets/manjilkarki/deepfake-and-real-images
+  - 140k Real and Fake Faces (StyleGAN) by xhlulu
+  - https://www.kaggle.com/datasets/xhlulu/140k-real-and-fake-faces
+  - DeepFakeFace (diffusion) by OpenRL
+  - https://huggingface.co/datasets/OpenRL/DeepFakeFace
+                                                                                                   
+  Libraries                                                                                      
+  - HuggingFace Transformers — https://github.com/huggingface/transformers                         
+  - PEFT (LoRA) — https://github.com/huggingface/peft                     
+  - PyTorch — https://pytorch.org                                                                  
+  - OpenCV — https://opencv.org                                                                    
+                                    
+>>>>>>> 1556ee6 (Added a new data set for deepfake face detection, and updated the training code to use it.)
