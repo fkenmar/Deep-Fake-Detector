@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 # Deepfake Detector
 
 An image-based deepfake detection web app that classifies face images as **Real** or **Deepfake** using a two-branch fusion model: a DoRA-fine-tuned CLIP ViT-L/14 backbone (spatial features) combined with a lightweight CNN over the 2D FFT magnitude spectrum (frequency artifacts). A Flask backend serves predictions, attention-rollout heatmaps, and uncanny-valley heuristics; a React/Vite frontend provides the UI.
@@ -190,4 +189,3 @@ This repository is for research and educational use. Please respect the upstream
   - PyTorch — https://pytorch.org                                                                  
   - OpenCV — https://opencv.org                                                                    
                                     
->>>>>>> 1556ee6 (Added a new data set for deepfake face detection, and updated the training code to use it.)
