@@ -5,7 +5,8 @@ An image-based deepfake detection web app that classifies face images as **Real*
 ## Images
 <img width="1512" height="857" alt="image" src="https://github.com/user-attachments/assets/9d42a6aa-5242-41f9-ab88-6c8be1085c31" />
 
-<img width="1512" height="856" alt="image" src="https://github.com/user-attachments/assets/53169003-1c43-4264-885d-d5ad56553bec" />
+<img width="979" height="747" alt="image" src="https://github.com/user-attachments/assets/6b0ff9f3-dc4b-42b7-99db-289b5f283c2a" />
+
 
 
 
