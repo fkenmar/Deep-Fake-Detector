@@ -2,6 +2,10 @@
 
 An image-based deepfake detection web app that classifies face images as **Real** or **Deepfake** using a two-branch fusion model: a DoRA-fine-tuned CLIP ViT-L/14 backbone (spatial features) combined with a lightweight CNN over the 2D FFT magnitude spectrum (frequency artifacts). A Flask backend serves predictions; a React/Vite frontend provides the UI.
 
+## Images
+<img width="1512" height="857" alt="image" src="https://github.com/user-attachments/assets/9d42a6aa-5242-41f9-ab88-6c8be1085c31" />
+
+
 ## Setup
 
 ```bash
