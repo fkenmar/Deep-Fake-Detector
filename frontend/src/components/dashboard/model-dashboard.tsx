@@ -1,19 +1,16 @@
 import type { AnalysisJob } from "@/types/api";
 import { ConfidenceGauge } from "./confidence-gauge";
-import { UncannyMetricsPanel } from "./uncanny-metrics";
-import { AiReasoning } from "./ai-reasoning";
 import { SideBySideView } from "./side-by-side-view";
-import { SegmentationMask } from "./segmentation-mask";
 import { useState } from "react";
 import { cn } from "@/lib/utils";
 import { useQueueStore } from "@/stores/queue-store";
 import { RotateCcw } from "lucide-react";
 
-interface ForensicDashboardProps {
+interface ModelDashboardProps {
   job: AnalysisJob;
 }
 
-export function ForensicDashboard({ job }: ForensicDashboardProps) {
+export function ModelDashboard({ job }: ModelDashboardProps) {
   const result = job.result ?? job.error?.partialResult;
   const [activeFaceIdx, setActiveFaceIdx] = useState(0);
   const { setActiveJob, removeJob } = useQueueStore();
@@ -31,6 +28,33 @@ export function ForensicDashboard({ job }: ForensicDashboardProps) {
     );
   }
 
+  if (!result.face_detected) {
+    return (
+      <div className="space-y-4 max-w-4xl mx-auto">
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className="text-base font-semibold text-on-surface">
+              No Face Detected
+            </h2>
+            <p className="text-sm text-on-surface-muted">{job.fileName}</p>
+          </div>
+          <button
+            onClick={handleNewAnalysis}
+            className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-on-surface-muted hover:text-on-surface bg-surface-elevated border border-border rounded-lg hover:bg-surface-sunken transition-colors"
+          >
+            <RotateCcw className="w-3.5 h-3.5" />
+            New Analysis
+          </button>
+        </div>
+        <div className="bg-surface-elevated border border-border rounded-xl p-5">
+          <p className="text-sm text-on-surface-muted">
+            The model was not run because YOLO did not detect a face crop to classify.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
   const face = result.faces[activeFaceIdx];
   if (!face) return null;
 
@@ -40,16 +64,9 @@ export function ForensicDashboard({ job }: ForensicDashboardProps) {
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-base font-semibold text-on-surface">
-            Forensic Report
+            Model Decision
           </h2>
-          <p className="text-sm text-on-surface-muted">
-            {job.fileName}
-            {job.sha256 && (
-              <span className="ml-2 font-mono text-xs text-on-surface-faint">
-                SHA-256: {job.sha256.slice(0, 12)}...
-              </span>
-            )}
-          </p>
+          <p className="text-sm text-on-surface-muted">{job.fileName}</p>
         </div>
         <button
           onClick={handleNewAnalysis}
@@ -91,17 +108,7 @@ export function ForensicDashboard({ job }: ForensicDashboardProps) {
         <SideBySideView imageUrl={job.thumbnail} faces={result.faces} />
       )}
 
-      {/* Confidence + Metrics grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <ConfidenceGauge confidence={face.confidence} label={face.label} />
-        <UncannyMetricsPanel uncanny={face.uncanny} />
-      </div>
-
-      {/* XAI Attention Map */}
-      <SegmentationMask gradcam={face.gradcam} originalImage={job.thumbnail} />
-
-      {/* AI Reasoning */}
-      <AiReasoning face={face} />
+      <ConfidenceGauge confidence={face.confidence} label={face.label} />
     </div>
   );
 }

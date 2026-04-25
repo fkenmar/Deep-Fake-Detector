@@ -49,9 +49,6 @@ export function QueueItem({ job, isActive }: QueueItemProps) {
           <p className="text-sm font-medium text-on-surface truncate">
             {job.fileName}
           </p>
-          <p className="text-xs text-on-surface-faint font-mono">
-            {(job.fileSize / 1024).toFixed(0)} KB
-          </p>
 
           {/* Status */}
           {job.status === "complete" && job.result && (

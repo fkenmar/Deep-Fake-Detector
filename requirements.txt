@@ -8,7 +8,6 @@ kagglehub
 opencv-python
 numpy
 scikit-learn
-mediapipe
 matplotlib
 albumentations
 tqdm

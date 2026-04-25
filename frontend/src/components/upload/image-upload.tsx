@@ -1,17 +1,11 @@
 import { useState, useRef, useCallback } from "react";
 import { cn } from "@/lib/utils";
 import { useQueueStore } from "@/stores/queue-store";
-import { HashVisualizer } from "./hash-visualizer";
-import { ExifWarning } from "./exif-warning";
-import { sha256 } from "@/lib/hash";
 import { Upload, FileImage } from "lucide-react";
 
-export function EvidentiaryUpload() {
+export function ImageUpload() {
   const [isDragOver, setIsDragOver] = useState(false);
   const [preview, setPreview] = useState<string | null>(null);
-  const [isHashing, setIsHashing] = useState(false);
-  const [hashProgress, setHashProgress] = useState(0);
-  const [hash, setHash] = useState<string | null>(null);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const addJob = useQueueStore((s) => s.addJob);
@@ -20,21 +14,10 @@ export function EvidentiaryUpload() {
     if (!file.type.startsWith("image/")) return;
 
     setSelectedFile(file);
-    setHash(null);
-    setIsHashing(true);
-    setHashProgress(0);
 
-    // Generate thumbnail
     const reader = new FileReader();
     reader.onload = (e) => setPreview(e.target?.result as string);
     reader.readAsDataURL(file);
-
-    // Compute SHA-256
-    const fileHash = await sha256(file, (_partial, pct) => {
-      setHashProgress(pct);
-    });
-    setHash(fileHash);
-    setIsHashing(false);
   }, []);
 
   const handleDrop = useCallback(
@@ -53,18 +36,12 @@ export function EvidentiaryUpload() {
     // Reset
     setSelectedFile(null);
     setPreview(null);
-    setHash(null);
-    setIsHashing(false);
-    setHashProgress(0);
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
   const handleClear = () => {
     setSelectedFile(null);
     setPreview(null);
-    setHash(null);
-    setIsHashing(false);
-    setHashProgress(0);
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
@@ -72,10 +49,10 @@ export function EvidentiaryUpload() {
     <div className="max-w-xl mx-auto space-y-4">
       <div>
         <h2 className="text-base font-semibold text-on-surface mb-1">
-          Evidence Upload
+          Image Upload
         </h2>
         <p className="text-sm text-on-surface-muted">
-          Upload media for forensic deepfake analysis
+          Upload an image for YOLO face detection and CLIP+FFT classification
         </p>
       </div>
 
@@ -141,16 +118,6 @@ export function EvidentiaryUpload() {
         />
       </div>
 
-      {/* Hash visualizer */}
-      <HashVisualizer
-        hash={hash}
-        isHashing={isHashing}
-        progress={hashProgress}
-      />
-
-      {/* EXIF warning */}
-      {selectedFile && <ExifWarning />}
-
       {/* Action buttons */}
       {selectedFile && (
         <div className="flex gap-3">
@@ -162,14 +129,12 @@ export function EvidentiaryUpload() {
           </button>
           <button
             onClick={handleSubmit}
-            disabled={isHashing}
             className={cn(
               "flex-1 py-2.5 px-4 rounded-lg text-sm font-medium transition-colors",
-              "bg-primary text-on-primary hover:bg-primary-hovered",
-              "disabled:opacity-50 disabled:cursor-not-allowed"
+              "bg-primary text-on-primary hover:bg-primary-hovered"
             )}
           >
-            {isHashing ? "Computing hash..." : "Analyze"}
+            Analyze
           </button>
         </div>
       )}

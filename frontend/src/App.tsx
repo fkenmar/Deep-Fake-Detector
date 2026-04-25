@@ -1,7 +1,7 @@
 import { AppShell } from "@/components/layout/app-shell";
 import { TaskQueueSidebar } from "@/components/sidebar/task-queue-sidebar";
-import { EvidentiaryUpload } from "@/components/upload/evidentiary-upload";
-import { ForensicDashboard } from "@/components/dashboard/forensic-dashboard";
+import { ImageUpload } from "@/components/upload/image-upload";
+import { ModelDashboard } from "@/components/dashboard/model-dashboard";
 import { useQueueStore } from "@/stores/queue-store";
 
 function App() {
@@ -15,10 +15,10 @@ function App() {
   return (
     <AppShell sidebar={<TaskQueueSidebar />}>
       {showDashboard ? (
-        <ForensicDashboard job={activeJob} />
+        <ModelDashboard job={activeJob} />
       ) : (
         <div className="flex items-center justify-center min-h-[calc(100vh-200px)]">
-          <EvidentiaryUpload />
+          <ImageUpload />
         </div>
       )}
     </AppShell>

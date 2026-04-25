@@ -76,10 +76,10 @@ export function SideBySideView({ imageUrl, faces }: SideBySideViewProps) {
           </div>
         </div>
 
-        {/* Annotated */}
+        {/* YOLO face boxes with model outputs */}
         <div>
           <p className="text-xs text-on-surface-faint mb-2 font-medium">
-            Annotated ({faces.length} face{faces.length !== 1 ? "s" : ""})
+            YOLO face crop{faces.length !== 1 ? "s" : ""} ({faces.length})
           </p>
           <div className="bg-surface-sunken rounded-lg overflow-hidden relative">
             <img

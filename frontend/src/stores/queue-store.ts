@@ -1,6 +1,5 @@
 import { create } from "zustand";
 import type { AnalysisJob, PredictResponse } from "@/types/api";
-import { sha256 } from "@/lib/hash";
 import { analyzeFaces } from "@/lib/api";
 
 interface QueueState {
@@ -32,10 +31,8 @@ export const useQueueStore = create<QueueState>((set, get) => ({
     const job: AnalysisJob = {
       id,
       fileName: file.name,
-      fileSize: file.size,
-      sha256: null,
       thumbnail,
-      status: "hashing",
+      status: "uploading",
       currentStep: 0,
       uploadProgress: 0,
       queuePosition: get().jobs.filter((j) => j.status !== "complete" && j.status !== "error").length + 1,
@@ -59,7 +56,7 @@ export const useQueueStore = create<QueueState>((set, get) => ({
 
     update(set, id, {
       status: "uploading",
-      currentStep: 2,
+      currentStep: 0,
       error: null,
       uploadProgress: 0,
       eta: { min: 3, max: 10 },
@@ -90,20 +87,6 @@ async function processJob(
 ) {
   fileCache.set(id, file);
 
-  // Step 1: Hash
-  try {
-    const hash = await sha256(file, (_partial, pct) => {
-      update(set, id, { uploadProgress: pct });
-    });
-    update(set, id, { sha256: hash, status: "uploading", currentStep: 1, uploadProgress: 0 });
-  } catch {
-    update(set, id, {
-      status: "error",
-      error: { message: "Failed to compute file hash", retryable: true },
-    });
-    return;
-  }
-
   await runUploadAndAnalyze(id, file, set, get);
 }
 
@@ -113,8 +96,7 @@ async function runUploadAndAnalyze(
   set: (fn: (s: QueueState) => Partial<QueueState>) => void,
   _get: () => QueueState
 ) {
-  // Step 2: Upload + analyze
-  update(set, id, { status: "uploading", currentStep: 2, eta: { min: 3, max: 12 } });
+  update(set, id, { status: "uploading", currentStep: 0, eta: { min: 3, max: 12 } });
 
   try {
     // Simulate step transitions during server-side processing
@@ -124,13 +106,13 @@ async function runUploadAndAnalyze(
       update(set, id, { uploadProgress: pct });
       if (pct >= 100 && !uploadDone) {
         uploadDone = true;
-        update(set, id, { status: "detecting", currentStep: 3, eta: { min: 2, max: 8 } });
+        update(set, id, { status: "detecting", currentStep: 1, eta: { min: 2, max: 8 } });
 
-        // Transition to "analyzing" after a delay
+        // The backend runs YOLO first, then passes each face crop to the model.
         setTimeout(() => {
           const job = _get().jobs.find((j) => j.id === id);
           if (job && job.status === "detecting") {
-            update(set, id, { status: "analyzing", currentStep: 4, eta: { min: 1, max: 4 } });
+            update(set, id, { status: "analyzing", currentStep: 2, eta: { min: 1, max: 4 } });
           }
         }, 2000);
       }
@@ -138,7 +120,7 @@ async function runUploadAndAnalyze(
 
     update(set, id, {
       status: "complete",
-      currentStep: 5,
+      currentStep: 3,
       result,
       eta: null,
       uploadProgress: 100,

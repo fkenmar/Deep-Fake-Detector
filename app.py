@@ -1,19 +1,11 @@
 import os
-import base64
-import io
 from pathlib import Path
 import cv2
 import numpy as np
 import torch
-import torch.nn.functional as F
-import mediapipe as mp
-from mediapipe.tasks.python import vision
-from mediapipe.tasks.python.core.base_options import BaseOptions
 from ultralytics import YOLO
 
-import contextlib
 from transformers import CLIPVisionModel, CLIPImageProcessor
-from transformers.models.clip.modeling_clip import CLIPAttention
 from model import DeepfakeDetector, CLIP_MODEL_ID
 from PIL import Image
 from flask import Flask, request, jsonify, render_template_string
@@ -23,25 +15,10 @@ from dotenv import load_dotenv; load_dotenv()
 
 app = Flask(__name__)
 CORS(app, origins="*")
-options = vision.FaceLandmarkerOptions(
-    base_options=BaseOptions(model_asset_path="./model/face_landmarker.task"),
-    running_mode=vision.RunningMode.IMAGE,
-    num_faces=1,
-    min_face_detection_confidence=0.3,
-    min_face_presence_confidence=0.3,
-)
-
-face_landmarker = vision.FaceLandmarker.create_from_options(options)
 
 YOLO_FACE_PATH = "./model/yolov8n-face.pt"
 YOLO_FACE_CONF = 0.35
 yolo_face = YOLO(YOLO_FACE_PATH)
-
-
-class _Landmark:
-    __slots__ = ("x", "y", "z")
-    def __init__(self, x, y, z=0.0):
-        self.x, self.y, self.z = x, y, z
 
 
 # ── Model ─────────────────────────────────────────────────────────────────────
@@ -59,10 +36,8 @@ model.eval()
 
 # ── Face Detection Helper ────────────────────────────────────────────────────
 def detect_faces(bgr_img):
-    """Detect faces with YOLOv8-face, then fit landmarks per-crop with MediaPipe.
-    Returns list of (landmarks_in_full_image_norm_coords_or_None, (x1,y1,x2,y2) pixels)."""
+    """Detect faces with YOLOv8-face and return padded face boxes."""
     h, w = bgr_img.shape[:2]
-    rgb = cv2.cvtColor(bgr_img, cv2.COLOR_BGR2RGB)
 
     results = yolo_face.predict(bgr_img, conf=YOLO_FACE_CONF, verbose=False)
     boxes = []
@@ -86,19 +61,7 @@ def detect_faces(bgr_img):
         if x2 <= x1 or y2 <= y1:
             continue
 
-        crop_rgb = rgb[y1:y2, x1:x2]
-        cw, ch = x2 - x1, y2 - y1
-        mp_crop = mp.Image(image_format=mp.ImageFormat.SRGB, data=crop_rgb)
-        lm_result = face_landmarker.detect(mp_crop)
-        if lm_result.face_landmarks:
-            crop_lms = lm_result.face_landmarks[0]
-            remapped = [
-                _Landmark((p.x * cw + x1) / w, (p.y * ch + y1) / h, p.z)
-                for p in crop_lms
-            ]
-        else:
-            remapped = None
-        faces.append((remapped, (x1, y1, x2, y2)))
+        faces.append((x1, y1, x2, y2))
 
     return faces
 
@@ -107,135 +70,6 @@ def crop_face(bgr_img, bbox):
     """Crop face region from image using bbox."""
     x1, y1, x2, y2 = bbox
     return bgr_img[y1:y2, x1:x2]
-
-
-# ── Uncanny Valley Analysis ──────────────────────────────────────────────────
-def analyze_uncanny(bgr_img, landmarks, face_bbox):
-    """Run uncanny valley heuristics on a BGR image using detected face region."""
-    results = {}
-    h, w = bgr_img.shape[:2]
-    gray = cv2.cvtColor(bgr_img, cv2.COLOR_BGR2GRAY)
-
-    if landmarks is None or face_bbox is None:
-        return {"symmetry": None, "eye_consistency": None, "texture": None,
-                "edge_natural": None, "color_consistency": None}
-
-    lm = landmarks
-    fx1, fy1, fx2, fy2 = face_bbox
-    face_gray = gray[fy1:fy2, fx1:fx2]
-    face_bgr = bgr_img[fy1:fy2, fx1:fx2]
-
-    # --- 1. Facial Symmetry ---
-    pairs = [(33, 263), (133, 362), (70, 300), (105, 334), (107, 336)]
-    nose_x = lm[1].x
-    diffs = []
-    for li, ri in pairs:
-        left_dist = abs(lm[li].x - nose_x)
-        right_dist = abs(lm[ri].x - nose_x)
-        if max(left_dist, right_dist) > 0:
-            diffs.append(abs(left_dist - right_dist) / max(left_dist, right_dist))
-    symmetry = 1.0 - (sum(diffs) / len(diffs)) if diffs else 1.0
-    results["symmetry"] = round(symmetry * 100, 1)
-
-    # --- 2. Eye Reflection Consistency ---
-    def eye_region(indices):
-        pts = [(int(lm[i].x * w), int(lm[i].y * h)) for i in indices]
-        xs = [p[0] for p in pts]
-        ys = [p[1] for p in pts]
-        x1, x2 = max(0, min(xs)), min(w, max(xs))
-        y1, y2 = max(0, min(ys)), min(h, max(ys))
-        if x2 <= x1 or y2 <= y1:
-            return None
-        return gray[y1:y2, x1:x2]
-
-    left_eye_idx = [33, 7, 163, 144, 145, 153, 154, 155, 133]
-    right_eye_idx = [362, 382, 381, 380, 374, 373, 390, 249, 263]
-    le = eye_region(left_eye_idx)
-    re = eye_region(right_eye_idx)
-
-    if le is not None and re is not None and le.size > 0 and re.size > 0:
-        le_resized = cv2.resize(le, (32, 16))
-        re_resized = cv2.resize(re, (32, 16))
-        h_left = cv2.calcHist([le_resized], [0], None, [32], [0, 256])
-        h_right = cv2.calcHist([re_resized], [0], None, [32], [0, 256])
-        cv2.normalize(h_left, h_left)
-        cv2.normalize(h_right, h_right)
-        eye_corr = cv2.compareHist(h_left, h_right, cv2.HISTCMP_CORREL)
-        results["eye_consistency"] = round(max(0, eye_corr) * 100, 1)
-    else:
-        results["eye_consistency"] = None
-
-    # --- 3. Skin Texture (FFT on face region only) ---
-    face_gray_f = np.float32(face_gray)
-    dft = cv2.dft(face_gray_f, flags=cv2.DFT_COMPLEX_OUTPUT)
-    dft_shift = np.fft.fftshift(dft)
-    magnitude = cv2.magnitude(dft_shift[:, :, 0], dft_shift[:, :, 1])
-    magnitude = np.log(magnitude + 1)
-
-    fh, fw = face_gray.shape[:2]
-    cy, cx = fh // 2, fw // 2
-    radius = min(cy, cx) // 3
-    total_energy = magnitude.sum()
-    mask = np.ones_like(magnitude)
-    cv2.circle(mask, (cx, cy), radius, 0, -1)
-    high_freq_energy = (magnitude * mask).sum()
-    texture_score = high_freq_energy / total_energy if total_energy > 0 else 0
-    results["texture"] = round(min(texture_score * 130, 100), 1)
-
-    # --- 4. Edge Artifacts (Laplacian on face boundary region) ---
-    # Create a ring mask around the face edge to check blending artifacts
-    face_h, face_w = face_gray.shape[:2]
-    ring_mask = np.zeros_like(face_gray)
-    center = (face_w // 2, face_h // 2)
-    outer_r = min(face_w, face_h) // 2
-    inner_r = int(outer_r * 0.75)
-    cv2.circle(ring_mask, center, outer_r, 255, -1)
-    cv2.circle(ring_mask, center, inner_r, 0, -1)
-
-    laplacian = cv2.Laplacian(face_gray, cv2.CV_64F)
-    edge_pixels = laplacian[ring_mask > 0]
-    lap_var = edge_pixels.var() if edge_pixels.size > 0 else 0
-    edge_score = min(lap_var / 20, 100)
-    results["edge_natural"] = round(edge_score, 1)
-
-    # --- 5. Lighting Consistency (face halves only) ---
-    face_mid = face_w // 2
-    left_half = face_bgr[:, :face_mid]
-    right_half = face_bgr[:, face_mid:]
-    left_mean = np.mean(left_half, axis=(0, 1))
-    right_mean = np.mean(right_half, axis=(0, 1))
-    color_diff = np.abs(left_mean - right_mean)
-    color_consistency = max(0, 100 - np.mean(color_diff) * 2)
-    results["color_consistency"] = round(color_consistency, 1)
-
-    # --- 6. Noise Pattern Analysis ---
-    # Real photos have natural sensor noise; AI-generated images have uniform/no noise.
-    # Extract noise by subtracting a blurred version from the original face.
-    denoised = cv2.GaussianBlur(face_gray, (5, 5), 0)
-    noise = face_gray.astype(np.float64) - denoised.astype(np.float64)
-
-    # Real noise has higher variance and non-uniform distribution across the face
-    noise_std = noise.std()
-
-    # Check noise uniformity — split face into 4 quadrants and compare noise levels
-    mid_y, mid_x = face_gray.shape[0] // 2, face_gray.shape[1] // 2
-    quadrants = [
-        noise[:mid_y, :mid_x], noise[:mid_y, mid_x:],
-        noise[mid_y:, :mid_x], noise[mid_y:, mid_x:],
-    ]
-    quad_stds = [q.std() for q in quadrants if q.size > 0]
-    # Low variation between quadrants = suspiciously uniform (AI-generated)
-    # High variation = natural sensor noise affected by lighting/skin
-    noise_variation = np.std(quad_stds) if len(quad_stds) > 1 else 0
-
-    # Combine: real images score high on both noise presence and non-uniformity
-    # noise_std typical range: 2-15 for real, 0-3 for AI
-    presence_score = min(noise_std / 10 * 100, 100)
-    uniformity_score = min(noise_variation / 2 * 100, 100)
-    noise_score = presence_score * 0.6 + uniformity_score * 0.4
-    results["noise_natural"] = round(min(noise_score, 100), 1)
-
-    return results
 
 # ── HTML UI ───────────────────────────────────────────────────────────────────
 HTML = """
@@ -342,49 +176,7 @@ HTML = """
     .result.deepfake .conf-bar { background: linear-gradient(90deg, #8a2c2c, #e05c5c); }
     .conf-text { font-size: 0.8rem; color: #888; }
 
-    .analysis { width: 100%; margin-top: 4px; display: none; }
-    .analysis h4 { font-size: 0.75rem; color: #555; text-transform: uppercase; letter-spacing: 1.5px; margin-bottom: 12px; }
-    .metric {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      margin-bottom: 10px;
-    }
-    .metric-label {
-      font-size: 0.8rem;
-      color: #999;
-      width: 130px;
-      flex-shrink: 0;
-    }
-    .metric-bar-wrap {
-      flex: 1;
-      height: 6px;
-      background: #1a1a1a;
-      border-radius: 3px;
-      overflow: hidden;
-    }
-    .metric-bar {
-      height: 100%;
-      border-radius: 3px;
-      transition: width 0.6s ease;
-    }
-    .metric-bar.good { background: linear-gradient(90deg, #1a5c3a, #4caf82); }
-    .metric-bar.warn { background: linear-gradient(90deg, #5c4a1a, #cfaa3e); }
-    .metric-bar.bad  { background: linear-gradient(90deg, #5c1a1a, #e05c5c); }
-    .metric-val {
-      font-size: 0.75rem;
-      color: #666;
-      width: 40px;
-      text-align: right;
-      flex-shrink: 0;
-    }
-    .metric-desc {
-      font-size: 0.7rem;
-      color: #444;
-      margin: -6px 0 10px 140px;
-    }
-
-    .history { width: 100%; max-width: 500px; margin-top: 24px; }
+	    .history { width: 100%; max-width: 500px; margin-top: 24px; }
     .history h3 { font-size: 0.85rem; color: #444; text-transform: uppercase; letter-spacing: 2px; margin-bottom: 12px; }
     .history-list { display: flex; flex-direction: column; gap: 8px; }
     .history-item {
@@ -465,22 +257,22 @@ HTML = """
       reader.onload = ev => {
         thumbData = ev.target.result;
         dropZone.innerHTML = '<img src="' + thumbData + '" />';
-      };
-      reader.readAsDataURL(file);
-      document.getElementById('analyzeBtn').disabled = false;
-      document.getElementById('clearBtn').disabled = false;
-      document.getElementById('result').style.display = 'none';
-    }
+	      };
+	      reader.readAsDataURL(file);
+	      document.getElementById('analyzeBtn').disabled = false;
+	      document.getElementById('clearBtn').disabled = false;
+	      document.getElementById('resultsContainer').innerHTML = '';
+	    }
 
-    function clearImage() {
-      selectedFile = null;
-      thumbData = null;
-      dropZone.innerHTML = '<div class="icon">+</div><span>Click or drag & drop an image</span>';
-      document.getElementById('analyzeBtn').disabled = true;
-      document.getElementById('clearBtn').disabled = true;
-      document.getElementById('result').style.display = 'none';
-      document.getElementById('fileInput').value = '';
-    }
+	    function clearImage() {
+	      selectedFile = null;
+	      thumbData = null;
+	      dropZone.innerHTML = '<div class="icon">+</div><span>Click or drag & drop an image</span>';
+	      document.getElementById('analyzeBtn').disabled = true;
+	      document.getElementById('clearBtn').disabled = true;
+	      document.getElementById('resultsContainer').innerHTML = '';
+	      document.getElementById('fileInput').value = '';
+	    }
 
     async function analyze() {
       if (!selectedFile) return;
@@ -497,18 +289,16 @@ HTML = """
         const container = document.getElementById('resultsContainer');
         container.innerHTML = '';
 
-        if (!data.face_detected) {
-          const face = data.faces[0];
-          const cls = face.label.toLowerCase();
-          container.innerHTML =
-            '<div class="face-result deepfake">' +
-              '<div class="verdict">NO FACE DETECTED</div>' +
-              '<div class="conf-text">Upload a clear, front-facing photo for accurate results</div>' +
-            '</div>';
-          btn.disabled = false;
-          btn.textContent = 'Analyze';
-          return;
-        }
+	        if (!data.face_detected) {
+	          container.innerHTML =
+	            '<div class="face-result deepfake">' +
+	              '<div class="verdict">NO FACE DETECTED</div>' +
+	              '<div class="conf-text">Upload a clear face photo so the model can analyze a face crop</div>' +
+	            '</div>';
+	          btn.disabled = false;
+	          btn.textContent = 'Analyze';
+	          return;
+	        }
 
         const faceCount = data.faces.length;
         data.faces.forEach((face, i) => {
@@ -519,28 +309,21 @@ HTML = """
           const div = document.createElement('div');
           div.className = 'face-result ' + cls;
           div.innerHTML =
-            '<div class="face-header">' +
-              (faceLabel ? '<span class="face-label">' + faceLabel + '</span>' : '') +
-              '<div class="verdict">' + verdictText + '</div>' +
-            '</div>' +
-            '<div class="conf-bar-wrap"><div class="conf-bar" style="width:0%"></div></div>' +
-            '<div class="conf-text">' + face.confidence + '% confidence</div>' +
-            '<div class="analysis" style="display:block; margin-top:8px;">' +
-              '<h4>Uncanny Valley Analysis</h4>' +
-              '<div class="metrics-container"></div>' +
-            '</div>';
-          container.appendChild(div);
+	            '<div class="face-header">' +
+	              (faceLabel ? '<span class="face-label">' + faceLabel + '</span>' : '') +
+	              '<div class="verdict">' + verdictText + '</div>' +
+	            '</div>' +
+	            '<div class="conf-bar-wrap"><div class="conf-bar" style="width:0%"></div></div>' +
+	            '<div class="conf-text">' + face.confidence + '% model confidence</div>';
+	          container.appendChild(div);
 
           // Animate confidence bar
           setTimeout(() => {
             div.querySelector('.conf-bar').style.width = face.confidence + '%';
           }, 50);
 
-          // Render uncanny metrics
-          renderMetricsInto(div.querySelector('.metrics-container'), face.uncanny);
-
-          addHistory(selectedFile.name + (faceLabel ? ' (' + faceLabel + ')' : ''), cls, face.confidence, thumbData);
-        });
+	          addHistory(selectedFile.name + (faceLabel ? ' (' + faceLabel + ')' : ''), cls, face.confidence, thumbData);
+	        });
       } catch (err) {
         alert('Analysis failed: ' + err.message);
       }
@@ -549,41 +332,7 @@ HTML = """
       btn.textContent = 'Analyze';
     }
 
-    const metricInfo = {
-      symmetry:          { label: 'Facial Symmetry',     desc: 'How balanced left vs right face features are' },
-      eye_consistency:   { label: 'Eye Reflections',     desc: 'Whether both eyes reflect light consistently' },
-      texture:           { label: 'Skin Texture',        desc: 'Presence of natural micro-texture (FFT analysis)' },
-      edge_natural:      { label: 'Edge Naturalness',    desc: 'Quality of edges around facial boundaries' },
-      color_consistency: { label: 'Lighting Consistency', desc: 'Whether lighting is uniform across the face' },
-      noise_natural:     { label: 'Noise Pattern',        desc: 'Presence of natural camera sensor noise (AI images lack this)' },
-    };
-
-    function renderMetricsInto(container, uncanny) {
-      container.innerHTML = '';
-      if (!uncanny) return;
-
-      for (const [key, info] of Object.entries(metricInfo)) {
-        const val = uncanny[key];
-        if (val === null || val === undefined) continue;
-
-        const grade = val >= 70 ? 'good' : val >= 40 ? 'warn' : 'bad';
-        const row = document.createElement('div');
-        row.innerHTML =
-          '<div class="metric">' +
-            '<span class="metric-label">' + info.label + '</span>' +
-            '<div class="metric-bar-wrap"><div class="metric-bar ' + grade + '" style="width:0%"></div></div>' +
-            '<span class="metric-val">' + val + '%</span>' +
-          '</div>' +
-          '<div class="metric-desc">' + info.desc + '</div>';
-        container.appendChild(row);
-
-        setTimeout(() => {
-          row.querySelector('.metric-bar').style.width = val + '%';
-        }, 100);
-      }
-    }
-
-    function addHistory(name, cls, conf, thumb) {
+	    function addHistory(name, cls, conf, thumb) {
       const section = document.getElementById('historySection');
       section.style.display = 'block';
       const list = document.getElementById('historyList');
@@ -600,94 +349,6 @@ HTML = """
 </body>
 </html>
 """
-
-# ── Attention Map ─────────────────────────────────────────────────────────────
-def generate_attention_map(pixel_values):
-    """Generate an attention heatmap using CLIP's self-attention weights.
-
-    Uses attention rollout: multiplies attention matrices across all layers
-    to show which input patches influence the final CLS token representation.
-    Works with frozen/adapter models since it reads attention weights directly.
-    Returns a base64-encoded PNG heatmap.
-    """
-    with torch.no_grad():
-        # Get attention weights from all layers
-        clip = model.clip_vision
-        try:
-            vision_model = clip.base_model.model.vision_model
-        except AttributeError:
-            vision_model = clip.vision_model
-
-        # sdpa attention ignores output_attentions=True; patch each layer's forward
-        # to use the parent CLIPAttention (eager) implementation so weights are returned.
-        patched = []
-        for layer in vision_model.encoder.layers:
-            attn = layer.self_attn
-            if type(attn) is not CLIPAttention:
-                # PyTorch __call__ ignores instance-level 'forward' patches.
-                # Since CLIPSdpaAttention subclasses CLIPAttention, we temporarily 
-                # change the class to invoke the parent's eager forward pass.
-                orig_class = attn.__class__
-                attn.__class__ = CLIPAttention
-                patched.append((attn, orig_class))
-        try:
-            vision_out = vision_model(pixel_values=pixel_values, output_attentions=True)
-        finally:
-            for attn, orig_class in patched:
-                attn.__class__ = orig_class
-        attentions = vision_out.attentions  # tuple of [B, heads, tokens, tokens]
-
-        if not attentions:
-            return None
-
-        # Attention rollout — multiply attention matrices across layers
-        # Average over heads first, then chain-multiply
-        rollout = None
-        for attn in attentions:
-            # attn: [B, heads, tokens, tokens]
-            attn_heads_mean = attn[0].mean(dim=0)  # [tokens, tokens]
-
-            # Add residual connection (identity)
-            attn_heads_mean = 0.5 * attn_heads_mean + 0.5 * torch.eye(
-                attn_heads_mean.size(0), device=attn_heads_mean.device
-            )
-
-            # Re-normalize rows
-            attn_heads_mean = attn_heads_mean / attn_heads_mean.sum(dim=-1, keepdim=True)
-
-            if rollout is None:
-                rollout = attn_heads_mean
-            else:
-                rollout = rollout @ attn_heads_mean
-
-        # Extract CLS token's attention to all spatial patches
-        # CLS is token 0, spatial patches are tokens 1:
-        cls_attention = rollout[0, 1:]  # [num_patches]
-
-        num_patches = cls_attention.shape[0]
-        grid_size = int(num_patches ** 0.5)
-
-        # Reshape to spatial grid
-        cam = cls_attention.reshape(grid_size, grid_size)
-
-        # Normalize to [0, 1]
-        cam = cam - cam.min()
-        if cam.max() > 0:
-            cam = cam / cam.max()
-
-        # Upscale and apply colormap
-        cam_np = cam.cpu().numpy()
-        cam_resized = cv2.resize(cam_np, (224, 224))
-        heatmap = cv2.applyColorMap(np.uint8(255 * cam_resized), cv2.COLORMAP_JET)
-        heatmap_rgb = cv2.cvtColor(heatmap, cv2.COLOR_BGR2RGB)
-
-        # Encode as base64 PNG
-        img = Image.fromarray(heatmap_rgb)
-        buf = io.BytesIO()
-        img.save(buf, format="PNG")
-        return base64.b64encode(buf.getvalue()).decode("utf-8")
-
-
 # ── Routes ────────────────────────────────────────────────────────────────────
 @app.route("/")
 def index():
@@ -707,33 +368,15 @@ def predict():
     faces = detect_faces(bgr)
 
     if not faces:
-        # No face detected — fall back to full image as single result
-        face_rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
-        img = Image.fromarray(face_rgb)
-        inputs = processor(images=img, return_tensors="pt")
-
-        with torch.no_grad():
-            outputs = model(**inputs)
-            probs = torch.softmax(outputs.logits, dim=1)[0]
-            predicted_idx = int(torch.argmax(probs).item())
-
-        gradcam = generate_attention_map(inputs["pixel_values"])
-
         return jsonify({
-            "faces": [{
-                "label": model.id2label[predicted_idx],
-                "confidence": round(float(probs[predicted_idx].item()) * 100, 1),
-                "uncanny": analyze_uncanny(bgr, None, None),
-                "bbox": None,
-                "gradcam": gradcam,
-            }],
+            "faces": [],
             "face_count": 0,
             "face_detected": False,
         })
 
     # Process each detected face
     results = []
-    for landmarks, face_bbox in faces:
+    for face_bbox in faces:
         face_bgr = crop_face(bgr, face_bbox)
         face_rgb = cv2.cvtColor(face_bgr, cv2.COLOR_BGR2RGB)
         img = Image.fromarray(face_rgb)
@@ -746,15 +389,11 @@ def predict():
 
         label = model.id2label[predicted_idx]
         confidence = round(float(probs[predicted_idx].item()) * 100, 1)
-        uncanny = analyze_uncanny(bgr, landmarks, face_bbox)
-        gradcam = generate_attention_map(inputs["pixel_values"])
 
         results.append({
             "label": label,
             "confidence": confidence,
-            "uncanny": uncanny,
             "bbox": list(face_bbox),
-            "gradcam": gradcam,
         })
 
     return jsonify({

@@ -7,10 +7,6 @@ interface ConfidenceGaugeProps {
 
 export function ConfidenceGauge({ confidence, label }: ConfidenceGaugeProps) {
   const isDeepfake = label === "Deepfake";
-  // Heuristic margin of error: higher confidence = lower margin
-  const margin = Math.round((1 - Math.abs(confidence / 100 - 0.5) * 2) * 15);
-  const lower = Math.max(0, confidence - margin);
-  const upper = Math.min(100, confidence + margin);
 
   return (
     <div className="bg-surface-elevated border border-border rounded-xl p-5">
@@ -33,25 +29,12 @@ export function ConfidenceGauge({ confidence, label }: ConfidenceGaugeProps) {
             {confidence}%
           </p>
           <p className="text-xs text-on-surface-faint font-mono">
-            +/- {margin}%
+            softmax
           </p>
         </div>
       </div>
 
-      {/* Confidence bar with uncertainty band */}
       <div className="relative h-3 bg-surface-sunken rounded-full overflow-hidden">
-        {/* Uncertainty band */}
-        <div
-          className={cn(
-            "absolute h-full rounded-full opacity-20",
-            isDeepfake ? "bg-danger" : "bg-success"
-          )}
-          style={{
-            left: `${lower}%`,
-            width: `${upper - lower}%`,
-          }}
-        />
-        {/* Point estimate */}
         <div
           className={cn(
             "absolute h-full rounded-full transition-all duration-700",
@@ -62,7 +45,7 @@ export function ConfidenceGauge({ confidence, label }: ConfidenceGaugeProps) {
       </div>
 
       <p className="text-xs text-on-surface-faint mt-2">
-        Confidence range: {lower}% - {upper}% (margin reflects model certainty)
+        Probability assigned by the classifier to its selected label.
       </p>
     </div>
   );

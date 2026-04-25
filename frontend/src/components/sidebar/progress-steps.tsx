@@ -2,11 +2,9 @@ import { cn } from "@/lib/utils";
 import { Check, Loader2 } from "lucide-react";
 
 const STEPS = [
-  "Hashing",
   "Uploading",
-  "Uploading",
-  "Face detection",
-  "Model inference",
+  "YOLO face detection",
+  "CLIP+FFT inference",
   "Complete",
 ];
 
@@ -15,19 +13,17 @@ interface ProgressStepsProps {
 }
 
 export function ProgressSteps({ currentStep }: ProgressStepsProps) {
-  // Deduplicate display steps
   const displaySteps = [
-    { label: "Hash verification", step: 0 },
-    { label: "File upload", step: 2 },
-    { label: "Face detection", step: 3 },
-    { label: "Model inference", step: 4 },
+    { label: "Upload", step: 0 },
+    { label: "YOLO face detection", step: 1 },
+    { label: "CLIP+FFT inference", step: 2 },
   ];
 
   return (
     <div className="flex flex-col gap-1">
       {displaySteps.map(({ label, step }) => {
         const done = currentStep > step;
-        const active = currentStep === step || (step === 2 && currentStep === 1);
+        const active = currentStep === step;
 
         return (
           <div key={step} className="flex items-center gap-2 py-0.5">

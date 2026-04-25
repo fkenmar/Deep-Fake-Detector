@@ -1,18 +1,7 @@
-export interface UncannyMetrics {
-  symmetry: number | null;
-  eye_consistency: number | null;
-  texture: number | null;
-  edge_natural: number | null;
-  color_consistency: number | null;
-  noise_natural: number | null;
-}
-
 export interface FaceResult {
   label: "Realism" | "Deepfake";
   confidence: number;
-  uncanny: UncannyMetrics;
   bbox: [number, number, number, number] | null;
-  gradcam: string | null;
 }
 
 export interface PredictResponse {
@@ -23,7 +12,6 @@ export interface PredictResponse {
 
 export type JobStatus =
   | "queued"
-  | "hashing"
   | "uploading"
   | "detecting"
   | "analyzing"
@@ -33,8 +21,6 @@ export type JobStatus =
 export interface AnalysisJob {
   id: string;
   fileName: string;
-  fileSize: number;
-  sha256: string | null;
   thumbnail: string | null;
   status: JobStatus;
   currentStep: number;
