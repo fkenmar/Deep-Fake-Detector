@@ -106,21 +106,13 @@ async function runUploadAndAnalyze(
       update(set, id, { uploadProgress: pct });
       if (pct >= 100 && !uploadDone) {
         uploadDone = true;
-        update(set, id, { status: "detecting", currentStep: 1, eta: { min: 2, max: 8 } });
-
-        // The backend runs YOLO first, then passes each face crop to the model.
-        setTimeout(() => {
-          const job = _get().jobs.find((j) => j.id === id);
-          if (job && job.status === "detecting") {
-            update(set, id, { status: "analyzing", currentStep: 2, eta: { min: 1, max: 4 } });
-          }
-        }, 2000);
+        update(set, id, { status: "analyzing", currentStep: 1, eta: { min: 1, max: 4 } });
       }
     });
 
     update(set, id, {
       status: "complete",
-      currentStep: 3,
+      currentStep: 2,
       result,
       eta: null,
       uploadProgress: 100,

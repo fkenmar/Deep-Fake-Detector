@@ -76,10 +76,10 @@ export function SideBySideView({ imageUrl, faces }: SideBySideViewProps) {
           </div>
         </div>
 
-        {/* YOLO face boxes with model outputs */}
+        {/* Classified image */}
         <div>
           <p className="text-xs text-on-surface-faint mb-2 font-medium">
-            YOLO face crop{faces.length !== 1 ? "s" : ""} ({faces.length})
+            Classified image
           </p>
           <div className="bg-surface-sunken rounded-lg overflow-hidden relative">
             <img

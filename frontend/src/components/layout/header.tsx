@@ -9,7 +9,7 @@ export function Header() {
           Deepfake Detector
         </h1>
         <p className="text-xs text-on-surface-muted">
-          YOLO face crop + CLIP/FFT classifier
+          CLIP/FFT classifier
         </p>
       </div>
     </header>

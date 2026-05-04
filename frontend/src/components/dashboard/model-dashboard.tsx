@@ -48,7 +48,7 @@ export function ModelDashboard({ job }: ModelDashboardProps) {
         </div>
         <div className="bg-surface-elevated border border-border rounded-xl p-5">
           <p className="text-sm text-on-surface-muted">
-            The model was not run because YOLO did not detect a face crop to classify.
+            The model could not classify this image.
           </p>
         </div>
       </div>

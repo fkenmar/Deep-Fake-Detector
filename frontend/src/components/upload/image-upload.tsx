@@ -52,7 +52,7 @@ export function ImageUpload() {
           Image Upload
         </h2>
         <p className="text-sm text-on-surface-muted">
-          Upload an image for YOLO face detection and CLIP+FFT classification
+          Upload an image for CLIP+FFT deepfake classification
         </p>
       </div>
 

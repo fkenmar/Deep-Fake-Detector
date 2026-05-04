@@ -3,7 +3,6 @@ import { Check, Loader2 } from "lucide-react";
 
 const STEPS = [
   "Uploading",
-  "YOLO face detection",
   "CLIP+FFT inference",
   "Complete",
 ];
@@ -15,8 +14,7 @@ interface ProgressStepsProps {
 export function ProgressSteps({ currentStep }: ProgressStepsProps) {
   const displaySteps = [
     { label: "Upload", step: 0 },
-    { label: "YOLO face detection", step: 1 },
-    { label: "CLIP+FFT inference", step: 2 },
+    { label: "CLIP+FFT inference", step: 1 },
   ];
 
   return (

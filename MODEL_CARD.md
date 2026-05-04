@@ -19,7 +19,7 @@ Two-branch fusion model for detecting AI-generated / deepfake faces.
 ## Install
 
 ```bash
-pip install torch transformers huggingface_hub pillow ultralytics opencv-python peft
+pip install torch transformers huggingface_hub pillow peft
 ```
 
 ## Usage
@@ -67,5 +67,5 @@ print(f"{label} ({confidence}%)")  # e.g. "Deepfake (98.3%)"
 
 ## Notes
 
-- Input should be a cropped face image. The model is trained on face crops, not full scene images.
+- Input should be a face-centered image (the training datasets are pre-cropped face images, so production input should match that framing for best results).
 - The CLIP backbone (`openai/clip-vit-large-patch14`) is loaded automatically on first use (~1.7GB download).

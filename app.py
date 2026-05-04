@@ -1,12 +1,9 @@
 import os
 from pathlib import Path
-import cv2
-import numpy as np
 import torch
-from ultralytics import YOLO
 
-from transformers import CLIPVisionModel, CLIPImageProcessor
-from model import DeepfakeDetector, CLIP_MODEL_ID
+from transformers import CLIPImageProcessor
+from model import DeepfakeDetector
 from PIL import Image
 from flask import Flask, request, jsonify, render_template_string, send_from_directory
 from flask_cors import CORS
@@ -17,62 +14,20 @@ app = Flask(__name__)
 CORS(app, origins="*")
 
 FRONTEND_DIST = Path("frontend/dist")
-YOLO_FACE_CONF = 0.35
 MODEL_DIR = Path("./model")
 MODEL_REPO = "knmrfr/deepfake-detector"
 
-# ── Model & YOLO loading ───────────────────────────────────────────────────────
+# ── Model loading ──────────────────────────────────────────────────────────────
 if (MODEL_DIR / "clip_vision").exists():
     print(f"Loading trained model from: {MODEL_DIR}")
-    yolo_path = str(MODEL_DIR / "yolov8n-face.pt")
     model = DeepfakeDetector.from_pretrained(MODEL_DIR)
     processor = CLIPImageProcessor.from_pretrained(MODEL_DIR)
 else:
     print(f"Downloading model from HF Hub: {MODEL_REPO}")
-    from huggingface_hub import hf_hub_download
-    yolo_path = hf_hub_download(repo_id=MODEL_REPO, filename="model/yolov8n-face.pt")
     model = DeepfakeDetector.from_pretrained(MODEL_REPO)
     processor = CLIPImageProcessor.from_pretrained(MODEL_REPO, subfolder="model")
 
-yolo_face = YOLO(yolo_path)
 model.eval()
-
-# ── Face Detection Helper ────────────────────────────────────────────────────
-def detect_faces(bgr_img):
-    """Detect faces with YOLOv8-face and return padded face boxes."""
-    h, w = bgr_img.shape[:2]
-
-    results = yolo_face.predict(bgr_img, conf=YOLO_FACE_CONF, verbose=False)
-    boxes = []
-    if results and len(results) > 0 and results[0].boxes is not None:
-        for xyxy in results[0].boxes.xyxy.cpu().numpy():
-            boxes.append(tuple(xyxy.tolist()))
-    print(f"[detect_faces] YOLOv8 returned {len(boxes)} face(s)")
-    if not boxes:
-        return []
-
-    faces = []
-    for bx1, by1, bx2, by2 in boxes:
-        bw = bx2 - bx1
-        bh = by2 - by1
-        pad_x = bw * 0.2
-        pad_y = bh * 0.2
-        x1 = int(max(0, bx1 - pad_x))
-        y1 = int(max(0, by1 - pad_y))
-        x2 = int(min(w, bx2 + pad_x))
-        y2 = int(min(h, by2 + pad_y))
-        if x2 <= x1 or y2 <= y1:
-            continue
-
-        faces.append((x1, y1, x2, y2))
-
-    return faces
-
-
-def crop_face(bgr_img, bbox):
-    """Crop face region from image using bbox."""
-    x1, y1, x2, y2 = bbox
-    return bgr_img[y1:y2, x1:x2]
 
 # ── HTML UI ───────────────────────────────────────────────────────────────────
 HTML = """
@@ -374,45 +329,24 @@ def predict():
         return jsonify({"error": "No image provided"}), 400
 
     file = request.files["image"]
-    arr = np.frombuffer(file.read(), np.uint8)
-    bgr = cv2.imdecode(arr, cv2.IMREAD_COLOR)
-    if bgr is None:
-        return jsonify({"error": "Could not decode image"}), 400
+    img = Image.open(file.stream)
+    if img.mode != "RGB":
+        img = img.convert("RGB")
 
-    faces = detect_faces(bgr)
+    inputs = processor(images=img, return_tensors="pt")
 
-    if not faces:
-        return jsonify({
-            "faces": [],
-            "face_count": 0,
-            "face_detected": False,
-        })
+    with torch.no_grad():
+        outputs = model(**inputs)
+        probs = torch.softmax(outputs.logits, dim=1)[0]
+        predicted_idx = int(torch.argmax(probs).item())
 
-    # Process each detected face
-    results = []
-    for face_bbox in faces:
-        face_bgr = crop_face(bgr, face_bbox)
-        face_rgb = cv2.cvtColor(face_bgr, cv2.COLOR_BGR2RGB)
-        img = Image.fromarray(face_rgb)
-        inputs = processor(images=img, return_tensors="pt")
+    label = model.id2label[predicted_idx]
+    confidence = round(float(probs[predicted_idx].item()) * 100, 1)
 
-        with torch.no_grad():
-            outputs = model(**inputs)
-            probs = torch.softmax(outputs.logits, dim=1)[0]
-            predicted_idx = int(torch.argmax(probs).item())
-
-        label = model.id2label[predicted_idx]
-        confidence = round(float(probs[predicted_idx].item()) * 100, 1)
-
-        results.append({
-            "label": label,
-            "confidence": confidence,
-            "bbox": list(face_bbox),
-        })
-
+    result = {"label": label, "confidence": confidence, "bbox": None}
     return jsonify({
-        "faces": results,
-        "face_count": len(results),
+        "faces": [result],
+        "face_count": 1,
         "face_detected": True,
     })
 

@@ -42,12 +42,11 @@ npm run dev
 ## How It Works
 
 1. User uploads a face image.
-2. YOLOv8-face detects faces and returns padded bounding boxes.
-3. Each face crop is passed through the two-branch detector:
+2. The image is passed through the two-branch detector:
    - **Branch 1:** CLIP ViT-L/14 vision encoder (spatial semantics).
    - **Branch 2:** 2D FFT magnitude spectrum → small CNN (frequency artifacts).
    - A fusion MLP head produces the Real / Deepfake logits.
-4. Per-face label and softmax confidence are returned to the frontend, along with the bounding box for overlay rendering.
+3. The label and softmax confidence are returned to the frontend.
 
 ## Training Recipe
 
@@ -97,8 +96,7 @@ npm run dev
 
 ### Inference & Serving
 
-- **YOLOv8-face detection with 20% bbox padding** — crops each face before classification so the model sees a consistent face-centered input instead of wide scenes.
-- **Multi-face support** — every detected face is classified independently and returned as its own result with bbox + label + confidence.
+- **Whole-image inference** — the uploaded image is passed directly through the model, matching the training/evaluation pipeline so production behavior aligns with reported AUC.
 - **`torch.no_grad()` everywhere in `/predict`** — no autograd graph is built for inference.
 
 ### Evaluation
@@ -125,12 +123,6 @@ npm run dev
 - **Label Smoothing.** Szegedy, C. et al. *Rethinking the Inception Architecture for Computer Vision.* CVPR 2016. https://arxiv.org/abs/1512.00567 — see also Müller, R., Kornblith, S., Hinton, G. *When Does Label Smoothing Help?* NeurIPS 2019. https://arxiv.org/abs/1906.02629
 - **Mixed-Precision Training (AMP).** Micikevicius, P. et al. *Mixed Precision Training.* ICLR 2018. https://arxiv.org/abs/1710.03740
 
-### Face Detection
-
-- **YOLOv8 (Ultralytics).** Jocher, G., Chaurasia, A., Qiu, J. *YOLO by Ultralytics* (v8), 2023. https://github.com/ultralytics/ultralytics
-- **YOLO (foundational).** Redmon, J. et al. *You Only Look Once: Unified, Real-Time Object Detection.* CVPR 2016. https://arxiv.org/abs/1506.02640
-- **WIDER FACE benchmark** (used to train the YOLOv8-face weights). Yang, S., Luo, P., Loy, C. C., Tang, X. *WIDER FACE: A Face Detection Benchmark.* CVPR 2016. https://arxiv.org/abs/1511.06523
-
 ### Datasets
 
 - **Deepfake and Real Images** — Manjil Karki (Kaggle). https://www.kaggle.com/datasets/manjilkarki/deepfake-and-real-images
@@ -147,7 +139,6 @@ npm run dev
 - **HuggingFace Transformers.** Wolf, T. et al. *Transformers: State-of-the-Art Natural Language Processing.* EMNLP 2020 (Demo). https://github.com/huggingface/transformers
 - **HuggingFace PEFT** (DoRA / LoRA adapters). https://github.com/huggingface/peft
 - **HuggingFace Hub** (`snapshot_download` for the DeepFakeFace dataset). https://github.com/huggingface/huggingface_hub
-- **Ultralytics** (YOLOv8 inference framework). https://github.com/ultralytics/ultralytics
 - **torchvision** (`ImageFolder`, dataset utilities). https://github.com/pytorch/vision
 - **OpenCV.** Bradski, G. *The OpenCV Library.* Dr. Dobb's Journal of Software Tools, 2000. https://opencv.org
 - **Albumentations.** Buslaev, A. et al. *Albumentations: Fast and Flexible Image Augmentations.* Information 11(2), 2020. https://github.com/albumentations-team/albumentations
@@ -182,4 +173,3 @@ This repository is for research and educational use. Please respect the upstream
 - CLIP ViT-L/14 weights — MIT License (OpenAI).
 - Kaggle datasets — see each dataset page for terms of use.
 - OpenRL DeepFakeFace — see the HuggingFace dataset page for terms of use.
-- YOLOv8 (Ultralytics) — AGPL-3.0; community-trained face weights inherit any restrictions of WIDER FACE and the upstream training pipeline.
