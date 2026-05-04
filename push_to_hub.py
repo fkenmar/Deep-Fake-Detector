@@ -23,7 +23,6 @@ REPO_ID = "knmrfr/deepfake-detector"
 MODEL_DIR = Path("model")
 
 SKIP = {
-    "clip_vision",          # already on HF as openai/clip-vit-large-patch14
     "lora",                 # dora supersedes lora
     "train_state.pt",       # training state, not needed for inference
     # epoch checkpoints
