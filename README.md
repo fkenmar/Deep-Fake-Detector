@@ -1,4 +1,5 @@
-# Slop
+# Deepfake Detector
+https://huggingface.co/spaces/knmrfr/deepfake-detector-demo?logs=build
 
 An image-based deepfake detection web app that classifies face images as **Real** or **Deepfake** using a two-branch fusion model: a DoRA-fine-tuned CLIP ViT-L/14 backbone (spatial features) combined with a lightweight CNN over the 2D FFT magnitude spectrum (frequency artifacts). A Flask backend serves predictions; a React/Vite frontend provides the UI.
 
